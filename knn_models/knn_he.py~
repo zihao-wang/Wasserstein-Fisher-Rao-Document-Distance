@@ -1,0 +1,123 @@
+import sys
+import pickle
+import time
+import os
+import argparse
+
+sys.path.append("..")
+
+import torch
+import numpy as np
+
+from dist_toolbox import wfrcost_matrix
+from knn_dataset_helper import KNNHeldoutEvaluation
+
+argParser = argparse.ArgumentParser()
+argParser.add_argument("--cuda", default='0')
+argParser.add_argument("--coef", type=float, default=1.0)
+argParser.add_argument("--dataset", default='twitter')
+
+
+def prepare_bow_dist(test_sample, train_sample, gran, coef=1):
+    costmats = []
+    mus = []
+    nus = []
+
+    xs, bows, ys = test_sample
+    bows = bows/np.sum(bows)
+    I = len(bows)
+
+    print("prefetch dist calculation")
+    for i in range(0, len(train_sample), gran):
+        crt_sample = train_sample[i: i+gran]
+        block_size = len(crt_sample)
+
+        # prepare source block
+        xsArray = np.repeat(xs.reshape([I, 1, -1]), block_size, axis=0)
+
+        xtlist, bowtlist = [], []
+        tllist = []
+        for xt, bowt, yt in crt_sample:
+
+            # prepare target block
+            bowt = bowt / np.sum(bowt)
+            xtlist.append(xt)
+            bowtlist.append(bowt)
+            tllist.append(len(bowt))
+
+        J = max(tllist)
+        xtArray = np.zeros([block_size, 1, J, 300])
+
+        for ii in range(block_size):
+            xtArray[ii, 1, :tllist[i], 300] = xtlist[ii]
+
+        xsTensor = torch.from_numpy(xsArray).cuda()
+        xtTensor = torch.from_numpy(xtArray).cuda()
+        costMatrix = wfrcost_matrix(torch.sqrt(torch.sum((xsTensor - xtTensor)**2, -1)), coef).cpu().numpy()
+        del xsTensor, xtTensor
+        torch.cuda.empty_cache()
+        costmats += np.split(costMatrix, range(1, block_size), axis=0)
+        mus += [bows] * block_size
+        nus += bowtlist
+
+    return mus, nus, costmats
+
+def one_round_iteration(bows_list, bowt_list, costmat_list, gran, u_list=None, v_list=None, K_list=None):
+    for i in range(0, len(bowt_list), gran):
+        bowsl = bows_list[i: i+gran]
+        bowtl = bowt_list[i: i+gran]
+        cosmat_l = costmat_list[i: i+gran]
+
+        num = len(bowsl)
+        I = max([len(bowsl) for bows in bowsl])
+        J = max([len(bowtl) for bowt in bowtl])
+
+        C = np.ones([num, I, J]) * np.inf
+        mu = np.zeros([num, I, 1])
+        nu = np.zeros([num, 1, J])
+        dx = np.ones([num, I, 1])
+        dy = np.ones([num, 1, J])
+
+
+        wfr_sinkhorn_iteration(C, mu, nu, epsilon, niter, u, v, dx, dy)
+
+
+
+    return K_list, u_list, v_list, dp_list, kp_list
+
+def knn_classifier(test_sample, train_sample, dist_mat_gran=100, wfr_mat_gran=1000):
+    """
+    knn classifier
+    :param test_sample: one tuple of vbowy
+    :param train_sample: list of tuple of vbowy
+    :param dist_mat_gran: calculate the distance
+    :param wfr_mat_gran: calculate the distance
+    :return:
+    """
+    # dist mat calculation
+    bows_list, bowt_list, costmat_list = prepare_bow_dist(test_sample, train_sample, dist_mat_gran)
+
+    # 20 prefetch
+
+    # wfr calculation
+    K_list, u_list, v_list, dp_list, kp_list = one_round_iteration(bows_list, bowt_list, costmat_list, wfr_mat_gran)
+
+
+def run_knn(dataset):
+    he = KNNHeldoutEvaluation(dataset)
+
+    test_vbowy = he.get_test_set()
+    # evaluate each test point
+    train_vbowys = he.get_random_train_split(ratio=1)
+    for tvbowy in test_vbowy:
+        knn_classifier(tvbowy, train_vbowys)
+
+
+if __name__=="__main__":
+    args = argParser.parse_args()
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
+    datasetID = args.dataset
+    coef = args.coef
+    print(datasetID, coef)
+    run_knn(datasetID, coef)
+
