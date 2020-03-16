@@ -20,7 +20,7 @@ argParser.add_argument("--testratio", type=float, default=1.0)
 argParser.add_argument("--trainratio", type=float, default=1.0)
 argParser.add_argument("--distgran", type=int, default=1)
 argParser.add_argument("--wfrgran", type=int, default=1)
-argParser.add_argument("--dataset", default='twitter')
+argParser.add_argument("--dataset", default='bbcsport')
 
 args = argParser.parse_args()
 args.device = None
@@ -337,7 +337,6 @@ def prune_stat(coef, trainratio, testratio, distgran, wfrgran, device=torch.devi
 
 
 if __name__=="__main__":
-
     # print(datasetID, coef)
     datasetID = args.dataset
     coef = args.coef
@@ -346,4 +345,4 @@ if __name__=="__main__":
     distgran = args.distgran
     wfrgran = args.wfrgran
     # prune_stat(coef, trainratio, testratio, distgran, wfrgran, device=args.device)
-    run_knn(datasetID, coef, trainratio, testratio, distgran, wfrgran)
+    run_knn(datasetID, coef, trainratio, testratio, distgran, wfrgran, device=args.device)

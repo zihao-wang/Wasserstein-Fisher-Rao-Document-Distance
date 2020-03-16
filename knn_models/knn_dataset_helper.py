@@ -277,5 +277,5 @@ def dataset_report():
 if __name__ == "__main__":
     args = argParser.parse_args()
     datasetID = args.dataset
-    dataset_report()
+    parse_dataset(datasetID)
 
